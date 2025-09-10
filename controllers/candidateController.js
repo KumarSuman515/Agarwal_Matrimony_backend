@@ -167,8 +167,19 @@ exports.deleteCandidate = async (req, res) => {
 exports.sendConnectionRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const { senderName, senderEmail } = req.body;
-    console.log("smtp: ", process.env.SMTP_HOST);
+    const { senderName, senderEmail, message } = req.body;
+    
+    console.log("=== CONNECTION REQUEST DEBUG ===");
+    console.log("Request params:", { id });
+    console.log("Request body:", { senderName, senderEmail, message });
+    console.log("SMTP Config:", {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      user: process.env.SMTP_USER ? "SET" : "NOT SET",
+      pass: process.env.SMTP_PASS ? "SET" : "NOT SET",
+      from: process.env.FROM_EMAIL
+    });
+    
     if (!senderName || !senderEmail)
       return res
         .status(400)
@@ -180,6 +191,15 @@ exports.sendConnectionRequest = async (req, res) => {
     if (!candidate.email)
       return res.status(400).json({ error: "Candidate has no email" });
 
+    // Check if SMTP configuration is missing
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error("SMTP configuration missing! Sending success response without email.");
+      return res.status(200).json({ 
+        message: "Connection request received (email service not configured)",
+        warning: "Email notification not sent due to missing SMTP configuration"
+      });
+    }
+
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT || 587),
@@ -188,7 +208,9 @@ exports.sendConnectionRequest = async (req, res) => {
         Number(process.env.SMTP_PORT) === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
-    console.log("transporter: ", transporter);
+    
+    console.log("Transporter created successfully");
+    
     await transporter.sendMail({
       from: process.env.FROM_EMAIL || process.env.SMTP_USER,
       to: candidate.email,
@@ -196,13 +218,18 @@ exports.sendConnectionRequest = async (req, res) => {
       subject: `New connection request on ${
         process.env.SITE_NAME || "Agarwal Samaj Matrimony"
       }`,
-      text: emailText(candidate),
-      html: mailHtml(candidate),
+      text: emailText(candidate, senderName, senderEmail, message),
+      html: mailHtml(candidate, senderName, senderEmail, message),
     });
 
+    console.log("Email sent successfully to:", candidate.email);
     res.status(200).json({ message: "Connection request email sent" });
   } catch (error) {
-    console.error("Email sending error:", error);
+    console.error("=== EMAIL SENDING ERROR ===");
+    console.error("Error details:", error);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    
     res.status(500).json({
       error: "Failed to send connection request email",
       details: error.message,
